@@ -1,5 +1,5 @@
 # External benchmark plugins (asv_bench_* distributions): name
-# normalisation.
+# normalisation and reporting of plugins that fail to import.
 
 import json
 import os
@@ -74,6 +74,54 @@ class TestPluginDiscovery(unittest.TestCase):
         self.assertIn("Dash", types)
         self.assertIn("Dotted", types)
         self.assertEqual(proc.stderr, "")
+
+    def test_import_error_is_reported(self):
+        _make_plugin(
+            self.site,
+            "asv_bench_broken",
+            "asv_bench_broken",
+            "import does_not_exist_xyz\n",
+        )
+        _make_plugin(self.site, "asv_bench_ok", "asv_bench_ok", _exported("Ok"))
+
+        proc = self._list_types()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        types = json.loads(proc.stdout)
+        self.assertIn("TimeBenchmark", types)
+        self.assertIn("Ok", types)
+        self.assertIn("asv_bench_broken", proc.stderr)
+        self.assertIn("does_not_exist_xyz", proc.stderr)
+
+    def test_import_error_raises_when_strict(self):
+        _make_plugin(
+            self.site,
+            "asv_bench_broken",
+            "asv_bench_broken",
+            "import does_not_exist_xyz\n",
+        )
+
+        proc = self._list_types(ASV_RUNNER_STRICT_PLUGINS="1")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("ModuleNotFoundError", proc.stderr)
+        self.assertIn("does_not_exist_xyz", proc.stderr)
+
+    def test_not_required_is_silent(self):
+        _make_plugin(
+            self.site,
+            "asv_bench_optional",
+            "asv_bench_optional",
+            """
+            from asv_runner.benchmarks._exceptions import NotRequired
+
+            raise NotRequired("optional dependency missing")
+            """,
+        )
+
+        for strict in ("", "1"):
+            proc = self._list_types(ASV_RUNNER_STRICT_PLUGINS=strict)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("TimeBenchmark", json.loads(proc.stdout))
+            self.assertEqual(proc.stderr, "")
 
 
 if __name__ == "__main__":

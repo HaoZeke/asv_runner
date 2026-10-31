@@ -33,8 +33,10 @@ adding a new submodule with an "export_as_benchmark" attribute.
 """
 
 import importlib
+import os
 import pkgutil
 import re
+import sys
 from pathlib import Path
 
 # py37 doesn't have importlib.metadata
@@ -63,6 +65,19 @@ for dist in distributions():
         asv_modules.append(normalized)
 benchmark_types = []
 
+
+def _report_plugin_failure(module_name, exc):
+    # A broken optional plugin must not stop discovery of the others, so it is
+    # only reported; ASV_RUNNER_STRICT_PLUGINS=1 turns it into an error.
+    if os.environ.get("ASV_RUNNER_STRICT_PLUGINS", "") == "1":
+        raise exc
+    print(
+        f"asv_runner: skipping benchmark plugin {module_name!r}: "
+        f"{type(exc).__name__}: {exc}",
+        file=sys.stderr,
+    )
+
+
 # Builtin modules
 for module_name in submodule_names:
     try:
@@ -86,5 +101,7 @@ for module_name in asv_modules:
             )
             if "export_as_benchmark" in dir(submodule):
                 benchmark_types.extend(iter(getattr(submodule, "export_as_benchmark")))
-    except (ImportError, NotRequired):
+    except NotRequired:
         pass
+    except ImportError as exc:
+        _report_plugin_failure(module_name, exc)

@@ -1,0 +1,1 @@
+A benchmark plugin that fails to import is reported on stderr instead of being skipped silently; set `ASV_RUNNER_STRICT_PLUGINS=1` to make it an error. Plugins raising `NotRequired` are still skipped silently.
