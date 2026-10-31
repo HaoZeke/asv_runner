@@ -34,6 +34,7 @@ adding a new submodule with an "export_as_benchmark" attribute.
 
 import importlib
 import pkgutil
+import re
 from pathlib import Path
 
 # py37 doesn't have importlib.metadata
@@ -53,8 +54,13 @@ submodule_names = [
 asv_modules = []
 for dist in distributions():
     name = dist.metadata.get("Name", None)
-    if isinstance(name, str) and name.startswith("asv_bench"):
-        asv_modules.append(name)
+    if not isinstance(name, str):
+        continue
+    # PEP 503 normalisation: asv-bench-foo, asv.bench_foo and asv_bench_foo
+    # are the same project; the importable package uses underscores.
+    normalized = re.sub(r"[-_.]+", "_", name).lower()
+    if normalized.startswith("asv_bench") and normalized not in asv_modules:
+        asv_modules.append(normalized)
 benchmark_types = []
 
 # Builtin modules
