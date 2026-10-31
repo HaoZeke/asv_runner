@@ -72,6 +72,11 @@ class TimeBenchmark(Benchmark):
 
     **timer** (`callable`)
     : The timer to use, by default it uses `timeit.default_timer`.
+
+    **setup_scope** (`str`)
+    : ``"call"`` (default) or ``"sample"``. ``"call"`` re-runs setup
+    before every timed call when a setup hook exists. ``"sample"`` runs
+    setup once per sample and batches the timed calls.
     """
 
     name_regex = re.compile("^(Time[A-Z_].+)|(time_.+)$")
@@ -115,6 +120,9 @@ class TimeBenchmark(Benchmark):
         self.sample_time = _get_first_attr(self._attr_sources, "sample_time", 0.01)
         self.warmup_time = _get_first_attr(self._attr_sources, "warmup_time", -1)
         self.timer = _get_first_attr(self._attr_sources, "timer", wall_timer)
+        # "call": setup before every timed call (default, asv#966).
+        # "sample": setup once per sample, then the statement `number` times.
+        self.setup_scope = _get_first_attr(self._attr_sources, "setup_scope", "call")
 
     def do_setup(self):
         """Execute the setup method and load variables."""
@@ -213,13 +221,23 @@ class TimeBenchmark(Benchmark):
         number = self.number
         # timeit(number=N) runs setup once, then the stmt N times: setup
         # (via redo_setup) is per sample, never between the inner calls.
-        # With setup hooks present every timed call must observe freshly
-        # set-up state (asv#966): auto number resolves to 1 under plain
+        # setup_scope "call" (default): every timed call observes freshly
+        # set-up state (asv#966). Auto number resolves to 1 under plain
         # timeit, and an explicit number > 1 batches through
         # _SetupInterleavedTimer (setup between calls, calls timed
-        # individually). Without setup hooks, plain timeit batching is
-        # unchanged.
-        isolate = self._setups and self._setup_isolates_timed_calls
+        # individually).
+        # setup_scope "sample": plain timeit batching, including when a
+        # setup hook exists. Auto number is calibrated to sample_time.
+        # Without setup hooks, plain timeit batching is unchanged.
+        scope = self.setup_scope
+        if scope not in ("call", "sample"):
+            raise ValueError(
+                f"asv: {self.name}: setup_scope must be 'call' or 'sample', "
+                f"got {scope!r}"
+            )
+        isolate = (
+            self._setups and self._setup_isolates_timed_calls and scope == "call"
+        )
         if isolate and number == 0:
             number = 1
         if isolate and number > 1:

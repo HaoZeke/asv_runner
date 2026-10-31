@@ -123,6 +123,99 @@ class TestSetupBeforeEachTimedCall(unittest.TestCase):
         self.assertGreater(result["number"], 1)
         self.assertGreaterEqual(len(result["samples"]), 1)
 
+    def test_sample_scope_setup_once_per_sample(self):
+        """setup_scope='sample' batches `number` calls on one setup."""
+        counts = {"setup": 0, "call": 0}
+        depths = []
+
+        class Suite:
+            setup_scope = "sample"
+            number = 4
+            repeat = 3
+            warmup_time = 0
+            min_run_count = 1
+            rounds = 1
+
+            def setup(self):
+                counts["setup"] += 1
+                self.x = 0
+
+            def time_add(self):
+                counts["call"] += 1
+                self.x += 1
+                depths.append(self.x)
+
+        result = _make_benchmark(Suite(), "time_add").run()
+        self.assertEqual(result["number"], 4)
+        # do_setup() once, then one setup per later sample. The first
+        # sample reuses that do_setup() state (redo_setup skips once).
+        self.assertEqual(counts["setup"], 3)
+        self.assertEqual(counts["call"], 12)
+        self.assertEqual(depths, [1, 2, 3, 4] * 3)
+
+    def test_sample_scope_auto_number_calibrates_with_setup(self):
+        seen = []
+
+        class Suite:
+            setup_scope = "sample"
+            sample_time = 0.002
+            repeat = 2
+            warmup_time = 0
+            min_run_count = 1
+            rounds = 1
+
+            def setup(self):
+                self.x = 0
+
+            def time_add(self):
+                self.x += 1
+                seen.append(self.x)
+
+        result = _make_benchmark(Suite(), "time_add").run()
+        self.assertGreater(result["number"], 1)
+        self.assertGreater(max(seen), 1)
+
+    def test_sample_scope_attribute_from_later_source(self):
+        """Class/module objects later in attr_sources can set the scope."""
+
+        class Later:
+            setup_scope = "sample"
+
+        class Suite:
+            sample_time = 0.002
+            repeat = 2
+            warmup_time = 0
+            min_run_count = 1
+            rounds = 1
+
+            def setup(self):
+                self.x = 0
+
+            def time_add(self):
+                self.x += 1
+
+        suite = Suite()
+        method = suite.time_add
+        benchmark = TimeBenchmark(
+            "Suite.time_add", method, [method, suite, Later]
+        )
+        benchmark.do_setup()
+        result = benchmark.run()
+        self.assertGreater(result["number"], 1)
+
+    def test_invalid_setup_scope_raises(self):
+        class Suite:
+            setup_scope = "module"
+
+            def setup(self):
+                self.x = 0
+
+            def time_add(self):
+                return self.x
+
+        with self.assertRaises(ValueError):
+            _make_benchmark(Suite(), "time_add").run()
+
 
 if __name__ == "__main__":
     unittest.main()
